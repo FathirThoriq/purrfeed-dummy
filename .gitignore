@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+instance/
+CLAUDE.md
+.claude/
+.hermes/
+dataset/
+dataset_uji/

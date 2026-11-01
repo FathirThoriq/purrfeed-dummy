@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Smart Cat Feeder</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="center">
+  <main class="card narrow">
+    <h1>Smart Cat Feeder</h1>
+    <p class="muted small">Masukkan kode unik yang tertera di alat, lalu pilih jenis hewan.</p>
+    <form id="form">
+      <label>Kode alat
+        <input type="text" id="code" placeholder="FEED-0001" autocomplete="off">
+      </label>
+      <fieldset class="modes">
+        <legend>Mode alat</legend>
+        <label class="opt"><input type="radio" name="mode" value="kucing" checked> Kucing</label>
+        <label class="opt"><input type="radio" name="mode" value="anjing"> Anjing</label>
+      </fieldset>
+      <p id="msg" class="err" hidden></p>
+      <button id="btn">Masuk ke dashboard</button>
+    </form>
+    <p class="muted small">Kode simulasi: <b>FEED-0001</b> (ada riwayat 7 hari), FEED-0002, FEED-0003.</p>
+  </main>
+  <script>
+    const msg = document.getElementById('msg');
+    document.getElementById('code').addEventListener('input', () => { msg.hidden = true; });
+    document.getElementById('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const code = document.getElementById('code').value.trim().toUpperCase();
+      const mode = document.querySelector('input[name=mode]:checked').value;
+      if (!code) { msg.textContent = 'Kode alat wajib diisi.'; msg.hidden = false; return; }
+      const btn = document.getElementById('btn');
+      btn.disabled = true;
+      try {
+        const r = await fetch('/api/devices/claim', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, mode }),
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error);
+        location.href = '/dashboard?code=' + encodeURIComponent(code);
+      } catch (err) {
+        msg.textContent = err.message || 'Gagal terhubung ke server.';
+        msg.hidden = false;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

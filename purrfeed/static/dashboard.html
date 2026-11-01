@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard Feeder</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Dashboard feeder</h1>
+      <span class="muted small" id="dev">Memuat…</span>
+    </div>
+    <div style="display:flex;gap:12px;align-items:center">
+      <span class="badge">Data simulasi</span>
+      <a href="/">Ganti alat</a>
+    </div>
+  </header>
+
+  <main class="dash">
+    <p id="loadErr" class="err" hidden></p>
+    <div class="notes" id="notes"></div>
+
+    <section class="stats">
+      <div class="card stat">
+        <div class="muted small">Sisa pakan</div>
+        <div class="value" id="sisa">–</div>
+        <div class="bar" id="sisaBar"><span style="width:0"></span></div>
+        <div class="muted small" id="sisaSub" style="margin-top:6px"></div>
+      </div>
+      <div class="card stat">
+        <div class="muted small">Perkiraan habis</div>
+        <div class="value" id="habis">–</div>
+        <div class="muted small" id="habisSub"></div>
+      </div>
+      <div class="card stat">
+        <div class="muted small">Pakan keluar hari ini</div>
+        <div class="value" id="today">–</div>
+        <div class="muted small" id="todaySub"></div>
+      </div>
+      <div class="card stat">
+        <div class="muted small">Ditahan hari ini</div>
+        <div class="value" id="hold">–</div>
+        <div class="muted small">bukan target / ragu</div>
+      </div>
+    </section>
+
+    <section class="two">
+      <div class="card">
+        <h2>Simulasi alat</h2>
+        <p class="muted small" style="margin-top:-6px">Unggah foto seolah-olah kamera alat menangkap hewan. Server memanggil <code>/api/predict</code>.</p>
+        <label class="drop" id="drop">
+          <input type="file" id="file" accept="image/*" hidden>
+          <span id="dropText" class="muted">Klik atau seret foto ke sini</span>
+          <img id="preview" alt="Pratinjau foto" hidden>
+        </label>
+        <div class="sim-actions">
+          <button id="send" disabled>Kirim ke alat</button>
+          <button id="refill" class="secondary">Isi ulang tabung</button>
+        </div>
+        <p id="simErr" class="err" hidden></p>
+        <div class="result" id="result" hidden>
+          <div class="decision" id="decision"></div>
+          <div id="probs"></div>
+          <dl class="kv" id="detail"></dl>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Pakan 7 hari terakhir</h2>
+        <div class="chart-box"><canvas id="chart"></canvas></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Riwayat</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Waktu</th><th>Foto</th><th>Kejadian</th><th>Hasil model</th><th>Pakan</th></tr></thead>
+          <tbody id="history"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="/dashboard.js"></script>
+</body>
+</html>

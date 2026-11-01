@@ -1,0 +1,84 @@
+{
+  "algoritma": "MobileNetV2 + SVM",
+  "parameter": {
+    "data": "dataset",
+    "extra": [],
+    "background_prefix": "benda_",
+    "test_dir": "dataset_uji",
+    "target": "kucing",
+    "negative": "nonkucing",
+    "prints": 100,
+    "test_size": 0.2,
+    "seed": 42,
+    "tau": 0.6,
+    "C": 1.0,
+    "out": "models/mobilenetv2_svm.joblib",
+    "no_refit": false
+  },
+  "uji": {
+    "n": 164,
+    "akurasi": 1.0,
+    "ci95": [
+      0.9771117529861488,
+      1.0
+    ],
+    "macro_f1": 1.0,
+    "confusion_matrix": [
+      [
+        53,
+        0
+      ],
+      [
+        0,
+        111
+      ]
+    ],
+    "salah_beri_pakan": 0,
+    "kucing_ditahan": 0
+  },
+  "uji_kucing_hitam_putih": [
+    52,
+    53
+  ],
+  "uji_kucing_cetak_layar": [
+    33,
+    33
+  ],
+  "dataset_uji/foto_user": [
+    3,
+    3
+  ],
+  "dataset_uji/hewan_lain": [
+    9,
+    10
+  ],
+  "dataset_uji/hewan_rumah": [
+    270,
+    270
+  ],
+  "dataset_uji/mainan_boneka": [
+    37,
+    37
+  ],
+  "dataset_uji/mainan_boneka_hewan": [
+    37,
+    37
+  ],
+  "dataset_uji/mainan_boneka_kucing": [
+    8,
+    8
+  ],
+  "dataset_uji/mainan_hello_kitty": [
+    29,
+    29
+  ],
+  "dataset_uji/mainan_kucing_mainan": [
+    37,
+    37
+  ],
+  "dataset_uji/mainan_maneki_neko": [
+    39,
+    39
+  ],
+  "inferensi_ms_per_gambar": 87.2
+}
