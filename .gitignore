@@ -4,5 +4,4 @@ instance/
 CLAUDE.md
 .claude/
 .hermes/
-dataset/
-dataset_uji/
+.env

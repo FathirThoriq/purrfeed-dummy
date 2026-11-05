@@ -12,7 +12,7 @@ def create_app(config=Config):
 
     db.init_app(app)
 
-    registry = ModelRegistry(app.config["MODEL_DIR"], app.config["MODEL_FILES"])
+    registry = ModelRegistry(app.config["MODEL_DIR"], app.config["MODEL_MODES"])
     registry.load()
     app.extensions["models"] = registry
 

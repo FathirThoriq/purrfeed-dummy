@@ -1,89 +1,120 @@
 <!doctype html>
-<html lang="id">
+<html lang="id" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Dashboard Feeder</title>
+  <title>PurrFeed Dashboard</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
+  <script src="/theme.js"></script>
+  <script src="/vendor/lucide.min.js"></script>
 </head>
 <body>
-  <header>
-    <div>
-      <h1>Dashboard feeder</h1>
-      <span class="muted small" id="dev">Memuat…</span>
-    </div>
-    <div style="display:flex;gap:12px;align-items:center">
-      <span class="badge">Data simulasi</span>
-      <a href="/">Ganti alat</a>
-    </div>
+  <header class="glass dashHeader">
+    <div class="brand"><svg class="mascot" aria-hidden="true"><use href="/mascot-sprite.svg#purrFace"/></svg>PurrFeed</div>
+    <div class="deviceChip"><span class="tile" id="petIcon"></span><b id="devCode">-</b><span id="devPet"></span></div>
+    <div class="spacer"></div>
+    <button class="themeToggle" data-theme-toggle aria-label="Ganti tema"><i class="i-sun" data-lucide="sun"></i><i class="i-moon" data-lucide="moon"></i></button>
+    <a class="btn" href="/"><i data-lucide="log-out" width="16" height="16"></i>Ganti Alat</a>
   </header>
 
   <main class="dash">
-    <p id="loadErr" class="err" hidden></p>
     <div class="notes" id="notes"></div>
 
-    <section class="stats">
-      <div class="card stat">
-        <div class="muted small">Sisa pakan</div>
-        <div class="value" id="sisa">–</div>
-        <div class="bar" id="sisaBar"><span style="width:0"></span></div>
-        <div class="muted small" id="sisaSub" style="margin-top:6px"></div>
-      </div>
-      <div class="card stat">
-        <div class="muted small">Perkiraan habis</div>
-        <div class="value" id="habis">–</div>
-        <div class="muted small" id="habisSub"></div>
-      </div>
-      <div class="card stat">
-        <div class="muted small">Pakan keluar hari ini</div>
-        <div class="value" id="today">–</div>
-        <div class="muted small" id="todaySub"></div>
-      </div>
-      <div class="card stat">
-        <div class="muted small">Ditahan hari ini</div>
-        <div class="value" id="hold">–</div>
-        <div class="muted small">bukan target / ragu</div>
+    <section aria-labelledby="hInput">
+      <h2 id="hInput">Input Gambar</h2>
+      <div class="glass panel">
+        <div class="tabs" role="tablist">
+          <button class="tab" role="tab" id="tabUpload" aria-selected="true" aria-controls="paneUpload"><i data-lucide="image" width="16" height="16"></i>Upload Gambar</button>
+          <button class="tab" role="tab" id="tabCam" aria-selected="false" aria-controls="paneCam"><i data-lucide="video" width="16" height="16"></i>ESP32-CAM</button>
+        </div>
+
+        <div class="split" id="paneUpload" role="tabpanel" aria-labelledby="tabUpload">
+          <div class="stage">
+            <div class="row">
+              <input type="file" id="file" accept="image/*" hidden>
+              <button class="btn" id="pick"><i data-lucide="upload" width="16" height="16"></i>Pilih File Gambar</button>
+              <button class="btn primary" id="classify" disabled><i data-lucide="play" width="16" height="16"></i>Klasifikasi Gambar</button>
+              <button class="btn" id="reset" disabled><i data-lucide="rotate-ccw" width="16" height="16"></i>Ulangi</button>
+            </div>
+            <div class="frame" id="dropzone">
+              <img id="preview" alt="Gambar yang dipilih" hidden>
+              <div class="empty" id="previewEmpty"><svg class="mascot" aria-hidden="true"><use href="/mascot-sprite.svg#purr"/></svg><span>Pilih gambar</span></div>
+            </div>
+          </div>
+          <div class="result" id="resultUpload"></div>
+        </div>
+
+        <div class="split" id="paneCam" role="tabpanel" aria-labelledby="tabCam" hidden>
+          <div class="stage">
+            <div class="status off" id="camStatus"><i data-lucide="wifi-off" width="18" height="18"></i><span>Menunggu alat</span></div>
+            <div class="frame" id="camFrame">
+              <img id="cam" alt="Hasil kamera ESP32-CAM" hidden>
+              <div class="empty" id="camEmpty"><svg class="mascot" aria-hidden="true"><use href="/mascot-sprite.svg#purr"/></svg><span>Belum ada tangkapan</span></div>
+            </div>
+          </div>
+          <div class="result" id="resultCam"></div>
+        </div>
       </div>
     </section>
 
-    <section class="two">
-      <div class="card">
-        <h2>Simulasi alat</h2>
-        <p class="muted small" style="margin-top:-6px">Unggah foto seolah-olah kamera alat menangkap hewan. Server memanggil <code>/api/predict</code>.</p>
-        <label class="drop" id="drop">
-          <input type="file" id="file" accept="image/*" hidden>
-          <span id="dropText" class="muted">Klik atau seret foto ke sini</span>
-          <img id="preview" alt="Pratinjau foto" hidden>
-        </label>
-        <div class="sim-actions">
-          <button id="send" disabled>Kirim ke alat</button>
-          <button id="refill" class="secondary">Isi ulang tabung</button>
+    <section aria-labelledby="hStat">
+      <h2 id="hStat">Statistik</h2>
+      <div class="stats">
+        <div class="glass stat stock">
+          <div class="label"><i data-lucide="package" width="16" height="16"></i>Sisa pakan</div>
+          <div class="value" id="sisa">-</div>
+          <div class="meter"><span id="sisaBar" style="width:0"></span></div>
+          <div class="sub" id="sisaSub"></div>
+          <button class="btn small" id="refill"><i data-lucide="package-plus" width="15" height="15"></i>Isi ulang</button>
         </div>
-        <p id="simErr" class="err" hidden></p>
-        <div class="result" id="result" hidden>
-          <div class="decision" id="decision"></div>
-          <div id="probs"></div>
-          <dl class="kv" id="detail"></dl>
-        </div>
+        <div class="glass stat s3"><div class="label"><i data-lucide="trending-up" width="16" height="16"></i>Rasio terbuang</div><div class="value" id="rasio">-</div><div class="sub" id="rasioSub"></div></div>
+        <div class="glass stat s3"><div class="label"><i data-lucide="scan-line" width="16" height="16"></i>Total klasifikasi</div><div class="value" id="total">-</div></div>
+        <div class="glass stat s3"><div class="label"><i id="petStatIcon" data-lucide="cat" width="16" height="16"></i><span id="petStatLabel">Terdeteksi</span></div><div class="value" id="hewan">-</div></div>
+        <div class="glass stat s3"><div class="label"><i data-lucide="ban" width="16" height="16"></i>Bukan Keduanya</div><div class="value" id="bukan">-</div></div>
       </div>
-      <div class="card">
-        <h2>Pakan 7 hari terakhir</h2>
-        <div class="chart-box"><canvas id="chart"></canvas></div>
+      <div class="charts">
+        <div class="glass chart">
+          <div class="head"><h3>Pakan 7 hari terakhir</h3><div class="legend"><span><i class="barA" style="background:var(--bar-a)"></i>Keluar</span><span><i style="background:var(--bar-b)"></i>Terbuang</span></div></div>
+          <div id="barChart"></div>
+        </div>
+        <div class="glass chart">
+          <div class="head"><h3>Confidence rata-rata, 7 hari terakhir</h3><div class="avg" id="confAvg">-</div></div>
+          <div id="lineChart"></div>
+        </div>
       </div>
     </section>
 
-    <section class="card">
-      <h2>Riwayat</h2>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Waktu</th><th>Foto</th><th>Kejadian</th><th>Hasil model</th><th>Pakan</th></tr></thead>
-          <tbody id="history"></tbody>
-        </table>
+    <section aria-labelledby="hHist">
+      <div class="histHead">
+        <h2 id="hHist">Riwayat</h2>
+        <div class="row">
+          <div class="seg" id="filter" role="group" aria-label="Filter sumber">
+            <button data-src="all" aria-pressed="true">Semua</button>
+            <button data-src="upload" aria-pressed="false">Upload</button>
+            <button data-src="esp32cam" aria-pressed="false">ESP32-CAM</button>
+          </div>
+          <div class="menuWrap">
+            <button class="btn" id="exportBtn" aria-haspopup="true" aria-expanded="false"><i data-lucide="download" width="16" height="16"></i>Export 7 Hari Terakhir</button>
+            <div class="menu" id="exportMenu" hidden>
+              <button data-format="csv"><i data-lucide="file-text" width="16" height="16"></i>CSV</button>
+              <button data-format="xlsx"><i data-lucide="file-spreadsheet" width="16" height="16"></i>Excel</button>
+            </div>
+          </div>
+        </div>
       </div>
+      <div class="glass hist" id="hist"></div>
     </section>
   </main>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <button class="fab" id="fab"><span class="face"><svg aria-hidden="true"><use href="/mascot-sprite.svg#purrFace"/></svg></span><span class="txt">Purr Assistant</span><span class="badge" id="badge" hidden aria-live="polite"></span></button>
+  <aside class="glass chat" id="chat" hidden aria-label="Purr Assistant">
+    <div class="chatHead"><span class="face"><svg aria-hidden="true"><use href="/mascot-sprite.svg#purrFace"/></svg></span><b>Purr Assistant</b><button id="chatClear" aria-label="Bersihkan chat" title="Bersihkan chat"><i data-lucide="trash-2" width="17" height="17"></i></button><button id="chatClose" aria-label="Tutup"><i data-lucide="x" width="18" height="18"></i></button></div>
+    <div class="tips"><h3><i data-lucide="sparkles" width="15" height="15"></i>Saran dari data dashboard</h3><div id="tips" style="display:grid;gap:8px"></div></div>
+    <div class="msgs" id="msgs" aria-live="polite"></div>
+    <form class="chatForm" id="chatForm"><input id="chatInput" placeholder="Tulis pesan" autocomplete="off" maxlength="300" aria-label="Pesan"><button class="btn primary" aria-label="Kirim"><i data-lucide="send" width="16" height="16"></i></button></form>
+  </aside>
+
   <script src="/dashboard.js"></script>
 </body>
 </html>

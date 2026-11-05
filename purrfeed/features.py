@@ -1,8 +1,21 @@
+# Harus sama dengan cara dataset dibuat di proyek training (~/Projects/preprocessing): foto -> segmentasi rembg
+# (isnet-general-use) -> crop kotak -> latar abu-abu 127 -> 224x224 -> JPEG -> MobileNetV2 (TensorFlow) -> GAP 1280.
+# Ubah salah satu langkah = naikkan FEATURE_VERSION di sini dan di bundle model, lalu latih ulang.
+FEATURE_VERSION = "mobilenetv2-tf-imagenet-seg127-1280"
+FEATURE_DIM = 1280
+
+import io
+import os
+
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+
 import numpy as np
-import torch
 from PIL import Image, ImageOps
-from torch import nn
-from torchvision import models
+
+IMG_SIZE = 224
+BACKGROUND_RGB = (127, 127, 127)
+SEGMENTATION_MODEL = "isnet-general-use"
+JPEG_QUALITY = 95
 
 
 def load_rgb(source):
@@ -13,19 +26,58 @@ def load_rgb(source):
         return ImageOps.exif_transpose(image).convert("RGB")
 
 
+def segment_crop_resize(rgb, session, remove):
+    """Same steps as the training notebook: foreground mask -> square crop on grey -> 224x224. Whole image if the mask is unusable."""
+    rgba = remove(rgb, session=session).convert("RGBA")
+    mask = (np.asarray(rgba.getchannel("A")) >= 128).astype(np.uint8) * 255
+    ratio = float((mask > 0).mean())
+    if not 0.005 <= ratio <= 0.995:
+        rgba = rgb.convert("RGBA")
+        mask = np.full((rgb.height, rgb.width), 255, dtype=np.uint8)
+    mask_img = Image.fromarray(mask, mode="L")
+    box = mask_img.getbbox()
+    crop_rgba = rgba.crop(box)
+    w, h = crop_rgba.size
+    side = max(w, h)
+    square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    square.alpha_composite(crop_rgba, ((side - w) // 2, (side - h) // 2))
+    background = Image.new("RGBA", (side, side), (*BACKGROUND_RGB, 255))
+    background.alpha_composite(square)
+    return background.convert("RGB").resize((IMG_SIZE, IMG_SIZE), Image.Resampling.LANCZOS)
+
+
+def as_training_jpeg(image):
+    """The dataset was stored as JPEG; round-trip the same way so features match what the model saw."""
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=JPEG_QUALITY)
+    buffer.seek(0)
+    return Image.open(buffer).convert("RGB")
+
+
 class FeatureExtractor:
-    """MobileNetV2 pretrained on ImageNet, without its classifier: image -> 1280-d embedding."""
+    """Photo -> segmented 224x224 -> MobileNetV2 (ImageNet, frozen, TensorFlow) -> 1280-d embedding."""
 
     def __init__(self):
-        weights = models.MobileNet_V2_Weights.IMAGENET1K_V2
-        network = models.mobilenet_v2(weights=weights).eval()
-        self.body = nn.Sequential(network.features, nn.AdaptiveAvgPool2d(1), nn.Flatten())
-        self.transform = weights.transforms()
+        from rembg import new_session, remove
+        from tensorflow.keras.applications import MobileNetV2
+        from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 
-    @torch.no_grad()
-    def __call__(self, images, batch_size=32):
+        self._remove = remove
+        self._session = new_session(SEGMENTATION_MODEL)
+        self._preprocess = preprocess_input
+        self.body = MobileNetV2(weights="imagenet", include_top=False, pooling="avg",
+                                input_shape=(IMG_SIZE, IMG_SIZE, 3))
+        self.body.trainable = False
+
+    def prepare(self, source):
+        """Segmented 224x224 RGB image for one photo (also useful to look at what the model sees)."""
+        segmented = segment_crop_resize(load_rgb(source), self._session, self._remove)
+        return as_training_jpeg(segmented)
+
+    def __call__(self, images, batch_size=16):
         batches = []
         for start in range(0, len(images), batch_size):
-            tensors = [self.transform(load_rgb(image)) for image in images[start:start + batch_size]]
-            batches.append(self.body(torch.stack(tensors)).numpy())
+            arrays = [np.asarray(self.prepare(image), dtype=np.float32) for image in images[start:start + batch_size]]
+            batch = self._preprocess(np.stack(arrays))
+            batches.append(self.body.predict(batch, verbose=0))
         return np.concatenate(batches).astype(np.float32)

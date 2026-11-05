@@ -5,7 +5,9 @@ from dataclasses import dataclass
 
 import joblib
 
-from .features import FeatureExtractor
+from .features import FEATURE_DIM, FEATURE_VERSION, FeatureExtractor
+
+REQUIRED_KEYS = ("classifier", "target", "tau", "algorithm")
 
 
 @dataclass(frozen=True)
@@ -19,33 +21,76 @@ class Prediction:
     tau: float
 
 
-class ModelRegistry:
-    """Loads one classifier per feeder mode at startup and shares a single feature extractor."""
+def validate(bundle, mode):
+    """Return an Indonesian error message if a trained bundle cannot be served for `mode`, else None."""
+    if not isinstance(bundle, dict):
+        return "isi file bukan dictionary hasil training"
+    missing = [key for key in REQUIRED_KEYS if key not in bundle]
+    if missing:
+        return f"kunci hilang: {', '.join(missing)}"
+    classifier = bundle["classifier"]
+    if not hasattr(classifier, "predict_proba") or not hasattr(classifier, "classes_"):
+        return "classifier tidak punya predict_proba/classes_ (pakai CalibratedClassifierCV atau model probabilistik)"
+    version = bundle.get("feature_version")
+    if version != FEATURE_VERSION:
+        return f"feature_version '{version}' tidak cocok dengan server ('{FEATURE_VERSION}'): fitur dibuat dengan backbone berbeda"
+    dim = getattr(classifier, "n_features_in_", FEATURE_DIM)
+    if dim != FEATURE_DIM:
+        return f"classifier menerima {dim} fitur, server menghasilkan {FEATURE_DIM}"
+    if bundle["target"] != mode:
+        return f"target model '{bundle['target']}' tidak sama dengan hewan '{mode}'"
+    if str(bundle["target"]) not in {str(c) for c in classifier.classes_}:
+        return f"kelas target '{bundle['target']}' tidak ada di classes_ {list(classifier.classes_)}"
+    if not 0 < float(bundle["tau"]) < 1:
+        return f"tau {bundle['tau']} harus di antara 0 dan 1"
+    return None
 
-    def __init__(self, model_dir, files):
+
+class ModelRegistry:
+    """Loads one classifier per animal mode at startup and shares a single feature extractor.
+
+    A model file is `<MODEL_DIR>/<mode>.joblib`. A file that fails validation is skipped, not served:
+    the reason is kept in `self.rejected` so the dashboard/health endpoint can show it.
+    """
+
+    def __init__(self, model_dir, modes):
         self.model_dir = model_dir
-        self.files = files
+        self._modes = tuple(modes)
         self.bundles = {}
+        self.rejected = {}
         self.extractor = None
         self._lock = threading.Lock()
 
     def load(self):
-        for mode, filename in self.files.items():
-            path = self.model_dir / filename
-            if path.exists():
-                self.bundles[mode] = joblib.load(path)
-        if self.bundles:
+        self.bundles.clear()
+        self.rejected.clear()
+        for mode in self._modes:
+            path = self.model_dir / f"{mode}.joblib"
+            if not path.exists():
+                continue
+            try:
+                bundle = joblib.load(path)
+            except Exception as exc:   # corrupt file, wrong sklearn version, missing class, ...
+                self.rejected[mode] = f"gagal dibaca: {type(exc).__name__}: {str(exc)[:160]}"
+                continue
+            problem = validate(bundle, mode)
+            if problem:
+                self.rejected[mode] = problem
+            else:
+                self.bundles[mode] = bundle
+        if self.bundles and self.extractor is None:
             self.extractor = FeatureExtractor()
 
     @property
     def modes(self):
-        return sorted(self.files)
+        return sorted(self._modes)
 
     def available(self, mode):
         return mode in self.bundles
 
     def describe(self):
-        return {mode: bundle["algorithm"] for mode, bundle in sorted(self.bundles.items())}
+        return {mode: {"algoritma": b["algorithm"], "tau": float(b["tau"]), "dilatih": b.get("trained_at")}
+                for mode, b in sorted(self.bundles.items())}
 
     def predict(self, mode, image_bytes):
         bundle = self.bundles[mode]

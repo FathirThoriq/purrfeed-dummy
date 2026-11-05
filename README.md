@@ -1,33 +1,39 @@
-# PURR-FEED Dummy — Website + Sistem Cerdas Smart Cat Feeder
+# PURR-FEED — Website + Sistem Cerdas Pet Feeder
 
-Purwarupa lokal smart cat feeder. Alat fisik belum dirakit, jadi **website berperan sebagai alat**: foto diunggah,
-server mengklasifikasikan foto dengan **MobileNetV2 (ekstraksi fitur) + SVM (klasifikasi)**, memutuskan
-**BERI PAKAN** atau **TAHAN**, lalu mengurangi stok tabung. Alat asli nanti cukup memanggil endpoint yang sama.
+Purwarupa lokal smart pet feeder untuk kucing dan anjing. **ESP32-CAM memotret otomatis tiap ±9 detik**
+(`INTERVAL_MS` di sketch; polling dashboard tiap 2 detik) dan mengirim ke `POST /api/predict`; server
+mengklasifikasikan dengan **MobileNetV2 (ekstraksi fitur) + SVM**, memutuskan **BERI PAKAN** atau **TAHAN**,
+lalu mengurangi stok tabung. Tab upload di dashboard memakai endpoint dan model yang sama (hanya `source`-nya
+berbeda). Alat asli cukup memanggil endpoint yang sama.
 
-Semua data stok dan riwayat di dashboard adalah **data simulasi**.
+Dashboard mulai **kosong**: tidak ada data contoh. Riwayat, statistik, dan grafik terisi hanya dari klasifikasi
+sungguhan (ESP32-CAM atau Upload). Stok tabung tetap simulasi (porsi ±30 g dengan derau, bukan load cell).
+Angka evaluasi model ada di proyek `purrfeed-ml` (`reports/`).
 
 ## Arsitektur
 
-```
- Browser / Postman / (nanti) ESP32
+```text
+ Browser / ESP32-CAM / Postman
               │ HTTP
               ▼
  ┌────────────────────── Flask (app.py) ──────────────────────┐
  │ routes.py   halaman web + endpoint /api/*                  │
  │ models.py   memuat model sekali saat start                 │
  │   └ features.py  MobileNetV2 → vektor 1280 fitur           │
- │   └ SVM (scikit-learn) → probabilitas kucing / nonkucing   │
+ │   └ SVM (scikit-learn) → probabilitas kelas               │
  │ decision.py keputusan BERI PAKAN / TAHAN (ambang τ)        │
- │ feeder.py   simulasi tabung, prakiraan habis, notifikasi   │
+ │ feeder.py   simulasi tabung, prakiraan habis, notifikasi,  │
+ │             statistik, riwayat, export                    │
+ │ assistant.py Purr Assistant (jawaban dari data DB)        │
  │ db.py       SQLite: alat & log kejadian                    │
  └─────────────────────────────────────────────────────────────┘
 ```
 
 Alur satu foto:
 
-```
-foto → MobileNetV2 (1280 fitur) → StandardScaler → SVM linear (Platt scaling) → p(kucing)
-     → label = kucing & p ≥ τ (0,6)  ? BERI PAKAN : TAHAN
+```text
+foto (esp32cam/upload) → MobileNetV2 (1280 fitur) → StandardScaler → SVM linear (Platt scaling) → p(label)
+     → label = target & p ≥ τ (0,6) ? BERI PAKAN : TAHAN
      → stok berkurang ±30 g, kejadian dicatat → dashboard
 ```
 
@@ -39,33 +45,26 @@ purrfeed-dummy/
 ├── requirements.txt
 ├── purrfeed/                 paket aplikasi
 │   ├── __init__.py           create_app(): konfigurasi, database, model, blueprint
-│   ├── config.py             path, kapasitas tabung, porsi, kode alat demo
+│   ├── config.py             path, kapasitas tabung, porsi, ID alat terdaftar, API pribadi
 │   ├── features.py           FeatureExtractor (MobileNetV2) + load_rgb (orientasi EXIF)
 │   ├── models.py             ModelRegistry: satu model per mode (kucing / anjing)
 │   ├── decision.py           aturan keputusan dan format persen
-│   ├── feeder.py             simulasi alat: keluarkan porsi, isi ulang, stok, notifikasi, data dashboard
-│   ├── db.py                 skema SQLite, data demo 7 hari, query
+│   ├── feeder.py             tabung, stok, statistik, grafik, riwayat, saran, export
+│   ├── assistant.py          Purr Assistant: jawaban berbasis data (tanpa LLM, tanpa angka karangan)
+│   ├── db.py                 skema SQLite, query
 │   ├── routes.py             halaman dan endpoint API
-│   └── static/               index.html (masuk), dashboard.html/.js, style.css
-├── training/
-│   ├── train.py              latih + evaluasi + simpan model
-│   ├── augment.py            augmentasi: kucing hitam-putih, kucing dicetak / di layar HP
-│   └── curate.py             kurasi kelas nonkucing (buang duplikat + k-means per kategori)
-├── dataset/
-│   ├── kucing/               266 foto kucing sendiri (data primer)
-│   └── nonkucing/            551 hasil kurasi dari 1.916 gambar nonkucing
-├── dataset_uji/              470 gambar khusus uji, tidak pernah dipakai latih
-├── models/mobilenetv2_svm.joblib     model terlatih
-├── reports/
-│   ├── mobilenetv2_svm_metrics.json  metrik pelatihan terakhir
-│   └── nonkucing_kurasi.csv          daftar 1.916 gambar: dipilih / tidak dipilih / duplikat
+│   └── static/               index.html (masuk), dashboard.html/.js/.css, theme.js,
+│                             vendor/lucide.min.js, fonts/ (self-host), mascot-sprite.svg, favicon.svg
+├── models/                   TEMPAT UNGGAH hasil training: kucing.joblib, anjing.joblib (lihat models/README.md)
 ├── contoh_foto/              foto untuk dicoba di website
+├── persona.md                gaya bicara Purr Assistant
+├── .env.example              contoh konfigurasi API pribadi
 └── instance/feeder.db        dibuat otomatis saat server pertama jalan
 ```
 
 ## Persiapan
 
-Python 3.10+. Dari folder proyek:
+Python 3.10 sampai 3.12. Dari folder proyek:
 
 ```bash
 python -m venv .venv
@@ -73,8 +72,9 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-PyTorch yang terpasang adalah versi CPU (tidak perlu GPU). Bobot MobileNetV2 (±14 MB) diunduh otomatis
-saat pertama dijalankan.
+Ekstraksi fitur memakai TensorFlow (MobileNetV2) dan rembg (segmentasi), sama dengan proyek training. Semuanya CPU,
+tidak perlu GPU. Python 3.12 (TensorFlow belum mendukung 3.14). Bobot MobileNetV2 dan model segmentasi
+(`~/.rembg/models/isnet-general-use`) diunduh otomatis saat pertama dijalankan.
 
 ## Menjalankan
 
@@ -82,102 +82,54 @@ saat pertama dijalankan.
 python app.py
 ```
 
-Buka http://127.0.0.1:5000, masukkan kode alat **FEED-0001**, pilih **Kucing**, lalu unggah foto dari
-`contoh_foto/` di kartu *Simulasi alat*.
+Buka http://127.0.0.1:5000, masukkan ID alat, pilih **Kucing** atau **Anjing**, lalu:
 
-| Kode alat | Isi awal |
+- **ESP32-CAM** (tab bawaan): hasil kamera tampil otomatis tiap ada frame baru (`POST /api/predict`
+  dengan `source=esp32cam`, polling `/api/latest` tiap 2 detik);
+- **Upload Gambar**: pilih file lalu **Klasifikasi Gambar** (endpoint sama, `source=upload`).
+
+| ID alat | Hewan awal |
 |---|---|
-| `FEED-0001` | riwayat pakan 7 hari (grafik & prakiraan langsung terisi) |
-| `FEED-0002`, `FEED-0003` | kosong, tabung penuh |
+| `FEED-0001` | kucing |
+| `FEED-0002` | anjing |
+| `FEED-0003` | kucing |
+
+Semua ID mulai dengan tabung penuh (2.000 g) dan tanpa riwayat. Hewan dipilih ulang tiap masuk.
+
+Kode `PF-XXXXX` dari halaman setup ESP32-CAM (`~/Arduino/purrfeed_provisioning`) tidak perlu didaftarkan:
+server mendaftarkannya otomatis saat foto pertama masuk atau saat kode itu dipakai login.
+Format: `PF-` + 5 karakter dari `23456789ABCDEFGHJKLMNPQRSTUVWXYZ`; format lain tetap ditolak.
 
 Variabel lingkungan opsional: `PORT` (default 5000), `HOST` (default 127.0.0.1; pakai `0.0.0.0` agar bisa
 diakses perangkat lain di Wi-Fi yang sama), `PURRFEED_DB`, `PURRFEED_MODEL_DIR`.
 
-Reset data simulasi: matikan server, hapus folder `instance/`, nyalakan lagi.
+Reset semua data: matikan server, hapus `instance/feeder.db`, nyalakan lagi (ID alat dibuat ulang, riwayat kosong).
 
-## Melatih ulang model
+## Model hasil training
 
-```bash
-python -m training.train
-```
+Training dilakukan di proyek terpisah, `~/Projects/purrfeed-ml` (Jupyter, dataset, kurasi, laporan hasil).
+Repo web ini hanya **memuat** hasilnya dari `models/`:
 
-Langkahnya:
-
-1. Membaca `dataset/` (subfolder = kelas: `kucing`, `nonkucing`).
-2. Membagi data asli secara bertingkat: 80% latih, 20% uji (seed 42).
-3. Membuat augmentasi **di memori, hanya dari bagian latih** (tidak bocor ke data uji):
-   - versi hitam-putih setiap foto kucing → kelas `kucing` (kamera malam);
-   - 100 foto kucing "dicetak" / tampil di layar HP di atas foto benda rumah (`benda_*`) → kelas `nonkucing`.
-4. Ekstraksi fitur MobileNetV2, latih SVM, evaluasi.
-5. Melatih ulang dengan seluruh data, lalu menyimpan `models/mobilenetv2_svm.joblib` dan
-   `reports/mobilenetv2_svm_metrics.json`.
-
-Opsi: `--data`, `--extra`, `--background-prefix`, `--test-dir`, `--target`, `--negative`, `--prints`, `--test-size`, `--seed`,
-`--tau`, `--C`, `--out`, `--no-refit`. Server harus dinyalakan ulang setelah model diganti.
-
-### Hasil pelatihan terakhir
-
-| Data uji (tidak dipakai saat latih) | Benar |
+| File | Untuk |
 |---|---|
-| Uji 20% (53 kucing + 111 nonkucing) | 164/164 — akurasi 100% (CI95 97,7–100%), macro-F1 1,000 |
-| Kucing uji versi hitam-putih (diberi pakan) | 52/53 |
-| Kucing uji versi cetak / layar HP (ditahan) | 33/33 |
-| `dataset_uji/hewan_rumah` (27 jenis × 10) | 270/270 ditahan |
-| `dataset_uji/mainan_*` (boneka, maneki-neko, Hello Kitty, mainan kucing) | 187/187 ditahan |
-| `dataset_uji/hewan_lain` (anjing) | 9/10 ditahan |
-| `dataset_uji/foto_user` (tikus, pipa busa, kucing cetak dari uji website) | 3/3 ditahan |
+| `models/kucing.joblib` | alat mode Kucing |
+| `models/anjing.joblib` | alat mode Anjing (belum ada) |
 
-Waktu inferensi ±30–90 ms per foto di CPU laptop. Angka 100% berasal dari 164 foto uji; tulis sebagai
-"akurasi ≥ 97% (CI 95%)" di laporan, bukan "sempurna".
+Cara memasang model baru:
 
-## Dataset
+1. Latih di `purrfeed-ml`, hasilnya `models/<hewan>.joblib`.
+2. Salin ke folder `models/` di sini.
+3. Restart server, lalu buka `/api/health`. Hewan harus ada di `model_siap`. Bila ditolak, alasannya ada di
+   `model_ditolak` dan tampil sebagai notifikasi di dashboard.
 
-**817 gambar asli**: 266 kucing (data primer, foto sendiri) dan 551 nonkucing (hasil kurasi). Rasio ±1 : 2,
-ditangani `class_weight="balanced"`. Augmentasi (266 kucing hitam-putih + 100 kucing cetak/layar) dibuat
-otomatis saat pelatihan, tidak disimpan sebagai file.
+Server memeriksa isi file saat dimuat: kunci wajib (`classifier`, `target`, `tau`, `algorithm`), `feature_version`
+harus sama dengan `purrfeed/features.py`, jumlah fitur 1280, `target` sama dengan nama file. Model yang tidak
+cocok ditolak, bukan dipakai dengan prediksi yang diam-diam salah. Format lengkap ada di `models/README.md`.
 
-### Kurasi kelas nonkucing
+`purrfeed/features.py` adalah salinan dari `ml/features.py` di proyek ML. Ubah backbone atau preprocessing di satu
+sisi berarti ubah dan naikkan `FEATURE_VERSION` di kedua sisi, lalu latih ulang model.
 
-Kelas nonkucing awalnya 1.916 gambar dari beberapa sumber (data sekunder). Agar tidak berlebihan dibanding
-data primer, semuanya digabung lalu dikurasi dengan `training/curate.py`:
-
-1. Ekstraksi fitur MobileNetV2 semua gambar.
-2. Buang gambar nyaris kembar (kemiripan kosinus ≥ 0,97): 37 gambar.
-3. Kelompokkan per kategori (dari nama file) dan beri kuota.
-4. Per kategori, k-means dengan k = kuota; ambil satu gambar terdekat ke setiap pusat klaster sehingga
-   variasi kategori tetap terwakili.
-
-| Kategori | Dipilih / tersedia | Sumber |
-|---|---|---|
-| Benda rumah (`benda_*`) | 120 / 224 | dataset PURR-FEED |
-| Gambar kucing palsu (`palsu_*`) | 13 / 13 | dataset PURR-FEED |
-| Tikus, tikus got, hamster, tupai | 20 per jenis (80) | Kaggle `iamsouravbanerjee/animal-image-dataset-90-different-animals` |
-| Cicak/kadal, kecoa, ular | 10 per jenis (30) | idem |
-| 19 hewan rumah/pekarangan lain (kelelawar, merpati, burung gereja, gagak, bebek, kalkun, beo, kelinci, possum, kura-kura, 9 jenis serangga) | 6 per jenis (114) | idem |
-| Anjing | 20 / 130 | Kaggle 90 animals, `antobenedetti/animals`, `prasunroy/natural-images` |
-| Bunga, buah, orang | 10 per kategori (30) | Kaggle `prasunroy/natural-images` |
-| Maneki-neko, mainan kucing | 30 per kategori (60) | Wikimedia Commons |
-| Boneka kucing | 24 / 24 | Wikimedia Commons |
-| Hello Kitty, boneka, boneka hewan | 20 per kategori (60) | Wikimedia Commons |
-| **Total** | **551 / 1.916** | |
-
-Rincian per file ada di `reports/nonkucing_kurasi.csv`. Data luar hanya untuk objek yang realistis ada di
-dalam rumah (tidak ada pesawat, mobil, gajah, dsb.); gambar Commons yang memuat kucing asli sudah dibuang.
-
-### Bukti kurasi tidak menurunkan kualitas
-
-Dua model dilatih dengan kucing latih yang sama; satu memakai seluruh 1.916 nonkucing, satu hanya hasil kurasi.
-
-| Data uji | Seluruh nonkucing | Hasil kurasi |
-|---|---|---|
-| Kucing uji (diberi pakan) | 53/54 | 53/54 |
-| Kucing uji hitam-putih | 51/54 | 54/54 |
-| Kucing uji cetak/layar (ditahan) | 32/33 | 33/33 |
-| `dataset_uji` (470, ditahan) | 470/470 | 469/470 |
-| 1.365 gambar yang **tidak terpilih** kurasi (ditahan) | (ikut dilatih) | 1.362/1.365 |
-
-Preprocessing yang dijalankan otomatis: orientasi EXIF dari foto HP diterapkan, resize 232 → crop tengah
-224×224, normalisasi ImageNet. Gambar hasil kurasi diperkecil ke maksimal 512 px.
+Hasil evaluasi, dataset, dan kurasi ada di `~/Projects/purrfeed-ml/README.md` dan `reports/`.
 
 ## Aturan keputusan
 
@@ -188,7 +140,7 @@ Preprocessing yang dijalankan otomatis: orientasi EXIF dari foto HP diterapkan, 
 | label = target, keyakinan ≥ τ, stok cukup | BERI PAKAN | `keyakinan 99,9% ≥ τ 0,60` |
 | BERI PAKAN tetapi stok < satu porsi | TAHAN | `stok pakan habis` |
 
-τ = 0,6 disimpan di dalam model (`--tau` saat latih). Keyakinan ≥ 99,95% ditampilkan sebagai "> 99,9%".
+τ = 0,6 disimpan di dalam model (kunci `tau` pada file `.joblib`). Keyakinan ≥ 99,95% ditampilkan sebagai "> 99,9%".
 
 ## Simulasi alat
 
@@ -206,10 +158,14 @@ Semua balasan berupa JSON. Error selalu berbentuk `{"error": "pesan"}` dengan ko
 | Metode | Endpoint | Fungsi |
 |---|---|---|
 | GET | `/api/health` | status server dan model yang siap |
-| POST | `/api/devices/claim` | daftarkan kode alat dan pilih mode |
+| POST | `/api/devices/claim` | daftarkan ID alat dan pilih hewan |
 | GET | `/api/dashboard?code=…` | semua data dashboard satu alat |
-| POST | `/api/predict` | klasifikasi foto + keputusan pakan (+ simulasi stok bila ada `code`) |
+| POST | `/api/predict` | klasifikasi foto + keputusan pakan (`source`: `esp32cam`/`upload`) |
+| GET | `/api/latest`, `/api/latest.jpg` | frame + hasil terakhir ESP32-CAM (polling dashboard) |
 | POST | `/api/refill` | isi ulang tabung sampai penuh |
+| POST | `/api/chat` | Purr Assistant (jawaban dari data alat, hanya membaca) |
+| GET | `/api/proaktif?code=…` | pesan yang Purr sampaikan sendiri (badge merah) |
+| GET | `/api/export?code=…&format=csv\|xlsx` | unduh riwayat 7 hari terakhir |
 | GET | `/`, `/dashboard` | halaman web |
 
 ### GET /api/health
@@ -219,7 +175,8 @@ curl http://127.0.0.1:5000/api/health
 ```
 
 ```json
-{"status": "ok", "model_siap": ["kucing"], "model": {"kucing": "MobileNetV2 + SVM"}}
+{"status": "ok", "model_siap": ["kucing"], "model": {"kucing": {"algoritma": "...", "tau": 0.6, "dilatih": "2026-11-01T22:34:43"}},
+ "model_ditolak": {}}
 ```
 
 ### POST /api/devices/claim
@@ -248,8 +205,9 @@ Body `multipart/form-data`:
 | Field | Wajib | Keterangan |
 |---|---|---|
 | `file` | ya | gambar JPG/PNG/WebP, maks 8 MB |
-| `code` | tidak | kode alat; bila ada, stok dikurangi dan kejadian dicatat |
+| `code` | tidak | ID alat; bila ada, stok dikurangi dan kejadian dicatat |
 | `mode` | tidak | `kucing` / `anjing`; default mode alat, atau `kucing` |
+| `source` | tidak | `esp32cam` (default, mengisi `/api/latest`) atau `upload` |
 
 ```bash
 curl -X POST http://127.0.0.1:5000/api/predict \
@@ -281,7 +239,7 @@ Tanpa `code`, hanya klasifikasi: `pakan_keluar_g` = 0 dan `stok` = `null`.
 |---|---|
 | 400 | `file` tidak ada, file bukan gambar, atau `mode` tidak dikenal |
 | 404 | `code` diisi tetapi tidak ditemukan |
-| 409 | model untuk mode tersebut belum ada (mis. `anjing`) |
+| 409 | model untuk hewan tersebut belum diunggah atau ditolak (mis. `anjing`) |
 | 413 | file lebih dari 8 MB |
 
 Di Postman: *Body* → *form-data* → key `file` bertipe *File*, key `code` bertipe *Text*.
@@ -303,7 +261,8 @@ Di Postman: *Body* → *form-data* → key `file` bertipe *File*, key `code` ber
 }
 ```
 
-`jenis` riwayat: `beri`, `tahan`, `isi_ulang`. `notifikasi[].level`: `info`, `peringatan`, `mendesak`.
+`jenis` riwayat: `beri`, `tahan`, `isi_ulang` (`buang` disiapkan untuk laporan sisa dari alat asli). `sumber`: `esp32cam`,
+`upload`, `sistem`. `notifikasi[].level`: `peringatan`, `mendesak`.
 Kode 404 bila alat tidak ditemukan.
 
 ### POST /api/refill
@@ -319,27 +278,72 @@ curl -X POST http://127.0.0.1:5000/api/refill \
 
 Kode 404 bila alat tidak ditemukan.
 
+## Purr Assistant dengan API pribadi
+
+Tanpa konfigurasi, chat memakai jawaban aturan (`assistant.rule_reply`). Dengan API kompatibel OpenAI
+(`POST {URL}/chat/completions`), jawaban dibuat LLM dari **persona + data alat**:
+
+Cara termudah: `cp .env.example .env`, isi `PURRFEED_LLM_URL`, `PURRFEED_LLM_MODEL`, `PURRFEED_LLM_KEY`, lalu
+nyalakan ulang server (`.env` hanya dibaca saat start). `.env` ada di `.gitignore`. Atau lewat shell:
+
+```bash
+export PURRFEED_LLM_URL=https://api-kamu.example/v1     # boleh sampai /chat/completions
+export PURRFEED_LLM_KEY=...                              # opsional, dikirim sebagai Bearer
+export PURRFEED_LLM_MODEL=nama-model
+export PURRFEED_LLM_HEADERS='{"X-Header": "nilai"}'      # opsional, header tambahan (JSON)
+python app.py                                            # fish: set -x PURRFEED_LLM_URL ...
+```
+
+Opsional: `PURRFEED_LLM_TEMPERATURE` (0,4), `PURRFEED_LLM_MAX_TOKENS` (300), `PURRFEED_LLM_TIMEOUT` (15 dtk),
+`PURRFEED_PERSONA` (path file persona).
+
+| File | Fungsi |
+|---|---|
+| `persona.md` | gaya bicara, cakupan, larangan. Dibaca ulang tiap pesan: edit, simpan, langsung berlaku |
+| `purrfeed/insights.py` | "belajar dari data": menghitung pola dari riwayat 7 hari (terbuang per waktu makan, confidence per sumber, tren pakan, hewan sasaran ditahan) + saran otomatis, dikirim ke LLM sebagai blok `DATA ALAT` |
+| `purrfeed/llm.py` | klien API, parsing keluaran JSON `{"teks", "aksi"}`, pembersih (emoji, markdown, nama model) |
+
+Purr hanya **membaca**: menjelaskan data dan memberi saran, tidak menggerakkan servo. Permintaan seperti
+"buang sisa pakan" dijawab bahwa Purr hanya bisa memberi saran.
+
+Pengaman:
+- Angka hanya dari blok `DATA ALAT`; persona melarang mengarang. Bila belum ada data (mis. pakan terbuang),
+  konteks menyuruh model bilang belum ada, bukan menebak.
+- Jawaban yang mengaku "sudah dibuang/diberi" ditolak dan diganti jawaban aturan.
+- API mati, timeout, HTTP error, atau balasan kosong/rusak: otomatis jawaban aturan. Respons `/api/chat`
+  memuat `sumber` (`llm` / `aturan`).
+- Konteks 6 giliran terakhir ikut dikirim; isi persona dan kunci API tidak pernah dikirim ke browser.
+
+**Inisiatif Purr.** Dashboard memeriksa `/api/proaktif` tiap 30 detik; bila ada hal yang perlu disampaikan, badge
+merah berisi angka muncul di tombol Purr dan pesannya masuk ke chat saat dibuka (stok < 20% / < 10%, perkiraan habis
+≤ 3 hari, ESP32-CAM diam > 2 menit, pola dari data). Dihitung dengan aturan, tanpa memakai API. Status "sudah dibaca"
+disimpan di browser. Tombol tempat sampah di header chat membersihkan percakapan.
+
 ## Database (SQLite, `instance/feeder.db`)
 
 | Tabel | Kolom |
 |---|---|
 | `devices` | `code` (PK), `mode`, `claimed`, `capacity_g`, `stock_g`, `portion_g` |
-| `events` | `id`, `code`, `ts`, `kind` (`beri`/`tahan`/`isi_ulang`), `grams`, `label`, `confidence`, `thumbnail` |
+| `events` | `id`, `code`, `ts`, `kind` (`beri`/`tahan`/`isi_ulang`; `buang` untuk laporan sisa dari alat), `grams`, `label`, `confidence`, `thumbnail`, `mode`, `source` (`esp32cam`/`upload`/`servo`/`sistem`), `elapsed_ms`, `ref_id` |
 
-## Ke alat asli (ESP32-CAM)
+Skema v3: database dengan skema lebih lama otomatis dipindah ke `instance/feeder.db.v<versi>-<waktu>.bak`
+(tidak dihapus) dan dibuat ulang tanpa riwayat.
 
-1. Jalankan server dengan `HOST=0.0.0.0 python app.py`.
-2. Saat sensor mendeteksi hewan, ESP32 memotret dan mengirim `POST /api/predict` dengan `file` dan `code`.
-3. Bila `keputusan == "BERI PAKAN"`, ESP32 menggerakkan servo; berat dari load cell bisa menggantikan nilai
-   `pakan_keluar_g` simulasi.
+## Ke alat asli (ESP32-CAM + 2 servo)
+
+Sketch: `~/Arduino/esp32cam_purrfeed/esp32cam_purrfeed.ino` (AI Thinker, `INTERVAL_MS` 5000, XGA q10).
+
+1. Jalankan server dengan `HOST=0.0.0.0 PORT=5055 python app.py` (samakan `SERVER_HOST`/`SERVER_PORT`
+   dengan IP laptop; interval di sketch: tiap 5 detik, prototipe web mensimulasikan tiap ±9 detik).
+2. ESP32-CAM memotret otomatis dan mengirim `POST /api/predict` dengan `file` dan `code`
+   (`source` default `esp32cam` → tampil di tab ESP32-CAM; dashboard polling `/api/latest` tiap 2 detik).
+3. Bila `keputusan == "BERI PAKAN"`, sketch menggerakkan servo penyalur sendiri (server tidak punya kontrol
+   servo manual). Berat dari load cell bisa menggantikan nilai `pakan_keluar_g` simulasi.
 
 ## Keterbatasan
 
-- Mode `anjing` belum punya model (`models/mobilenetv2_svm_anjing.joblib`), sehingga membalas 409.
-- Contoh kucing cetak/layar dibuat sintetis; foto cetak/layar sungguhan dan boneka yang benar-benar ada di
-  rumah sebaiknya ditambahkan ke `dataset/nonkucing`.
-- Foto di `contoh_foto/kucing` diambil dari `dataset/` (ikut dilatih); foto lain di `contoh_foto/` berasal
-  dari `dataset_uji/`.
-- Data primer hanya kelas kucing (266). Untuk versi akhir, foto benda dan hewan di sekitar feeder yang
-  dipotret sendiri sebaiknya menggantikan sebagian data sekunder.
+- Hewan `anjing` belum punya model (`models/anjing.joblib`), sehingga membalas 409 sampai file hasil training diunggah.
+- Stok tabung dan berat porsi masih simulasi (belum ada load cell).
+- Foto di `contoh_foto/kucing` diambil dari dataset latih (ikut dilatih), jadi bukan bukti akurasi. Bukti akurasi ada di
+  `purrfeed-ml/reports/`.
 - Tidak ada autentikasi; jangan dibuka ke internet publik tanpa menambahkan API key.
