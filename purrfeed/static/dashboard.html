@@ -26,6 +26,7 @@
       <div class="glass panel">
         <div class="tabs" role="tablist">
           <button class="tab" role="tab" id="tabUpload" aria-selected="true" aria-controls="paneUpload"><i data-lucide="image" width="16" height="16"></i>Upload Gambar</button>
+          <button class="tab" role="tab" id="tabWebcam" aria-selected="false" aria-controls="paneWebcam"><i data-lucide="webcam" width="16" height="16"></i>Webcam</button>
           <button class="tab" role="tab" id="tabCam" aria-selected="false" aria-controls="paneCam"><i data-lucide="video" width="16" height="16"></i>ESP32-CAM</button>
         </div>
 
@@ -43,6 +44,23 @@
             </div>
           </div>
           <div class="result" id="resultUpload"></div>
+        </div>
+
+        <div class="split" id="paneWebcam" role="tabpanel" aria-labelledby="tabWebcam" hidden>
+          <div class="stage">
+            <div class="row">
+              <select class="camSelect" id="camSelect" aria-label="Pilih kamera"><option value="">Klik Nyalakan untuk izin kamera</option></select>
+              <button class="btn" id="camStart"><i data-lucide="power" width="16" height="16"></i>Nyalakan</button>
+              <button class="btn primary" id="camShot" disabled><i data-lucide="scan-search" width="16" height="16"></i>Klasifikasi &amp; Catat</button>
+              <label class="check"><input type="checkbox" id="camLive" checked><span>Deteksi langsung</span></label>
+            </div>
+            <div class="frame" id="webcamFrame">
+              <video id="webcam" autoplay muted playsinline hidden></video>
+              <canvas class="boxes" id="webcamBox" aria-hidden="true"></canvas>
+              <div class="empty" id="webcamEmpty"><svg class="mascot" aria-hidden="true"><use href="/mascot-sprite.svg#purr"/></svg><span>Kamera belum menyala</span></div>
+            </div>
+          </div>
+          <div class="result" id="resultWebcam"></div>
         </div>
 
         <div class="split" id="paneCam" role="tabpanel" aria-labelledby="tabCam" hidden>
@@ -92,6 +110,7 @@
           <div class="seg" id="filter" role="group" aria-label="Filter sumber">
             <button data-src="all" aria-pressed="true">Semua</button>
             <button data-src="upload" aria-pressed="false">Upload</button>
+            <button data-src="webcam" aria-pressed="false">Webcam</button>
             <button data-src="esp32cam" aria-pressed="false">ESP32-CAM</button>
           </div>
           <div class="menuWrap">

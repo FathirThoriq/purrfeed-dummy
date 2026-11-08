@@ -102,6 +102,7 @@ def result_json(prediction, decision, grams, stock, mode, code, source):
         "kelas": feeder.kelas_of(prediction.label),
         "confidence": prediction.confidence,
         "probabilitas": prediction.probabilities,
+        "kotak": prediction.box,
         "keputusan": decision.label,
         "alasan": decision.reason,
         "pakan_keluar_g": grams,
@@ -133,8 +134,8 @@ def predict():
         return error("ID alat tidak ditemukan.", 404)
 
     source = request.form.get("source", "esp32cam")
-    if source not in ("esp32cam", "upload"):
-        return error("source harus 'esp32cam' atau 'upload'.", 400)
+    if source not in ("esp32cam", "upload", "webcam"):
+        return error("source harus 'esp32cam', 'upload', atau 'webcam'.", 400)
 
     mode = request.form.get("mode") or (device["mode"] if device else "kucing")
     if mode not in registry().modes:

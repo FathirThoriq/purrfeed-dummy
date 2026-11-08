@@ -83,7 +83,7 @@ function renderResult(target, r) {
   target.classList.remove('fade'); void target.offsetWidth; target.classList.add('fade');
   const verdict = el('div', 'verdict',
     el('div', 'icon', icon(r.kelas === 'Bukan Keduanya' ? 'ban' : (r.mode === 'anjing' ? 'dog' : 'cat'), 32)),
-    el('div', '', el('div', 'kelas', r.kelas), el('div', 'conf', `Confidence ${pct(r.confidence)} · ${r.sumber === 'upload' ? 'Upload' : 'ESP32-CAM'}`)));
+    el('div', '', el('div', 'kelas', r.kelas), el('div', 'conf', `Confidence ${pct(r.confidence)} · ${({ upload: 'Upload', webcam: 'Webcam' })[r.sumber] || 'ESP32-CAM'}`)));
   target.append(verdict);
   target.append(el('h3', '', 'Hasil Klasifikasi'));
   const facts = el('dl', 'facts');
@@ -172,14 +172,15 @@ function historyItem(r) {
 }
 
 /* ---------- tabs upload / kamera ---------- */
+const TABS = { upload: ['tabUpload', 'paneUpload'], webcam: ['tabWebcam', 'paneWebcam'], cam: ['tabCam', 'paneCam'] };
 function selectTab(which) {
-  const up = which === 'upload';
-  $('tabUpload').setAttribute('aria-selected', up);
-  $('tabCam').setAttribute('aria-selected', !up);
-  $('paneUpload').hidden = !up; $('paneCam').hidden = up;
+  for (const [name, [tab, pane]] of Object.entries(TABS)) {
+    $(tab).setAttribute('aria-selected', name === which);
+    $(pane).hidden = name !== which;
+  }
+  if (which === 'webcam') listCameras().catch(() => {}); else stopWebcam();
 }
-$('tabUpload').addEventListener('click', () => selectTab('upload'));
-$('tabCam').addEventListener('click', () => selectTab('cam'));
+for (const name of Object.keys(TABS)) $(TABS[name][0]).addEventListener('click', () => selectTab(name));
 
 function dropzoneActive(on) { $('dropzone').classList.toggle('live', on); }
 ['dragover', 'dragenter'].forEach((ev) => $('dropzone').addEventListener(ev, (e) => { e.preventDefault(); dropzoneActive(true); }));
@@ -213,6 +214,133 @@ $('classify').addEventListener('click', async () => {
   } catch (e) { toast(e.message, true); }
   finally { btn.disabled = false; }
 });
+
+/* ---------- webcam USB (getUserMedia) + kotak deteksi ---------- */
+const CAM_KEY = 'pf-webcam';
+let camStream = null, camBusy = false, camTimer = null, lastBox = null;
+resultHTML($('resultWebcam'), 'Nyalakan webcam, arahkan ke hewan.');
+
+async function listCameras() {
+  const sel = $('camSelect');
+  const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput' && d.deviceId);
+  if (!cams.length) {   // Firefox baru menampilkan daftar kamera setelah izin diberikan
+    sel.replaceChildren(el('option', '', camStream ? 'Kamera aktif' : 'Klik Nyalakan untuk izin kamera'));
+    sel.firstChild.value = '';
+    return;
+  }
+  const current = camStream?.getVideoTracks()[0]?.getSettings().deviceId || localStorage.getItem(CAM_KEY) || '';
+  sel.replaceChildren(...cams.map((d, i) => {
+    const o = el('option', '', d.label || `Kamera ${i + 1}`); o.value = d.deviceId; o.selected = d.deviceId === current; return o;
+  }));
+}
+async function startWebcam() {
+  if (!navigator.mediaDevices?.getUserMedia) { toast('Browser tidak mengizinkan kamera (buka lewat localhost atau HTTPS).', true); return; }
+  stopWebcam();
+  const id = $('camSelect').value || localStorage.getItem(CAM_KEY);
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { ...(id ? { deviceId: { exact: id } } : {}), width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+  } catch (e) {
+    if (id && e.name === 'OverconstrainedError') { localStorage.removeItem(CAM_KEY); $('camSelect').value = ''; return startWebcam(); }
+    toast(e.name === 'NotReadableError' ? 'Kamera sedang dipakai aplikasi lain. Tutup aplikasinya lalu coba lagi.'
+      : e.name === 'NotAllowedError' ? 'Izin kamera ditolak browser/sistem. Izinkan kamera untuk situs ini lalu muat ulang.'
+      : e.name === 'NotFoundError' ? 'Kamera tidak ditemukan.' : `Kamera gagal dibuka: ${e.message}`, true);
+    return;
+  }
+  const v = $('webcam');
+  v.srcObject = camStream; v.hidden = false; $('webcamEmpty').hidden = true; $('webcamFrame').classList.add('live');
+  $('camShot').disabled = false;
+  $('camStart').replaceChildren(icon('power-off'), ' Matikan');
+  await listCameras();
+  const used = camStream.getVideoTracks()[0].getSettings().deviceId;
+  if (used) localStorage.setItem(CAM_KEY, used);
+  scheduleLive(300);
+}
+function stopWebcam() {
+  clearTimeout(camTimer);
+  if (!camStream) return;
+  camStream.getTracks().forEach((t) => t.stop());
+  camStream = null; lastBox = null;
+  const v = $('webcam'); v.srcObject = null; v.hidden = true;
+  $('webcamEmpty').hidden = false; $('webcamFrame').classList.remove('live');
+  $('camShot').disabled = true;
+  $('camStart').replaceChildren(icon('power'), ' Nyalakan');
+  drawBox();
+}
+$('camStart').addEventListener('click', () => (camStream ? stopWebcam() : startWebcam()));
+$('camSelect').addEventListener('change', () => { localStorage.setItem(CAM_KEY, $('camSelect').value); if (camStream) startWebcam(); });
+$('camLive').addEventListener('change', () => { if ($('camLive').checked) scheduleLive(0); else { clearTimeout(camTimer); lastBox = null; drawBox(); } });
+
+function grabFrame() {
+  const v = $('webcam');
+  const c = document.createElement('canvas');
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0);
+  return new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.92));
+}
+async function classifyFrame(record) {
+  const v = $('webcam');
+  if (!camStream || !v.videoWidth || camBusy) return null;
+  camBusy = true;
+  try {
+    const fd = new FormData();
+    fd.append('file', await grabFrame(), 'webcam.jpg');
+    fd.append('mode', DATA?.device.mode || 'kucing');
+    if (record) { fd.append('code', code); fd.append('source', 'webcam'); } else fd.append('source', 'upload');
+    const r = await api('/api/predict', { method: 'POST', body: fd });
+    if (!camStream) return null;
+    lastBox = r; drawBox(); renderResult($('resultWebcam'), { ...r, sumber: 'webcam' });
+    return r;
+  } finally { camBusy = false; }
+}
+function scheduleLive(ms) {
+  clearTimeout(camTimer);
+  if (!camStream || !$('camLive').checked) return;
+  camTimer = setTimeout(async () => {
+    try { await classifyFrame(false); } catch (e) { toast(e.message, true); }
+    scheduleLive(700);
+  }, ms);
+}
+$('camShot').addEventListener('click', async () => {
+  const btn = $('camShot'); btn.disabled = true;
+  try {
+    while (camBusy) await new Promise((ok) => setTimeout(ok, 100));
+    const r = await classifyFrame(true);
+    if (r) { toast(r.pakan_keluar_g ? `Tercatat: beri pakan ${num(r.pakan_keluar_g)} g.` : `Tercatat: ${r.alasan}.`); await load(); }
+  } catch (e) { toast(e.message, true); }
+  finally { btn.disabled = !camStream; }
+});
+
+/* Kotak = area objek yang dipotong untuk model (hasil segmentasi), digambar di atas video. */
+function drawBox() {
+  const c = $('webcamBox'), v = $('webcam'), frame = $('webcamFrame');
+  const dpr = window.devicePixelRatio || 1;
+  c.width = frame.clientWidth * dpr; c.height = frame.clientHeight * dpr;
+  const g = c.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, frame.clientWidth, frame.clientHeight);
+  const r = lastBox;
+  if (!r || !camStream || !v.videoWidth) return;
+  const scale = Math.min(frame.clientWidth / v.videoWidth, frame.clientHeight / v.videoHeight);
+  const w = v.videoWidth * scale, h = v.videoHeight * scale;
+  const ox = (frame.clientWidth - w) / 2, oy = (frame.clientHeight - h) / 2;
+  const [x0, y0, x1, y1] = r.kotak || [0, 0, 1, 1];
+  const bx = ox + x0 * w, by = oy + y0 * h, bw = (x1 - x0) * w, bh = (y1 - y0) * h;
+  const isTarget = r.label === r.mode;
+  const color = r.keputusan === 'BERI PAKAN' ? '#8FD0C7' : isTarget ? '#E6C175' : '#F0A184';
+  g.lineWidth = 3; g.strokeStyle = color; g.setLineDash(r.kotak ? [] : [8, 6]);
+  g.strokeRect(bx + 1.5, by + 1.5, Math.max(bw - 3, 0), Math.max(bh - 3, 0));
+  g.setLineDash([]);
+  const text = `${r.kelas} ${pct(r.confidence)}${r.kotak ? '' : ' · seluruh frame'}`;
+  g.font = '700 14px "Plus Jakarta Sans", sans-serif';
+  const tw = g.measureText(text).width + 16, th = 26;
+  const tx = Math.min(Math.max(bx, ox), ox + w - tw), ty = by - th >= oy ? by - th : by;
+  g.fillStyle = color; g.fillRect(tx, ty, tw, th);
+  g.fillStyle = '#031816'; g.textBaseline = 'middle'; g.fillText(text, tx + 8, ty + th / 2 + 1);
+}
+window.addEventListener('resize', drawBox);
+$('webcam').addEventListener('loadedmetadata', drawBox);
+navigator.mediaDevices?.addEventListener?.('devicechange', () => { if (camStream) listCameras(); });
 
 /* ---------- kamera: polling ---------- */
 async function poll() {

@@ -15,7 +15,6 @@ class Decision:
 
 
 def format_percent(p):
-    """Indonesian percent; never shows 100% or 0% because the model is never certain."""
     if p >= 0.9995:
         return "> 99,9%"
     if 0 < p < 0.0005:

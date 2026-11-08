@@ -22,9 +22,8 @@ Cara pasang: salin file hasil Jupyter ke sini, lalu **restart server**. Buka `/a
 | `trained_at` | opsional, waktu training |
 
 Model boleh 3 kelas (`anjing`, `kucing`, `other`): file `kucing.joblib` dan `anjing.joblib` boleh berisi classifier yang sama,
-yang beda hanya `target`. Kelas selain `target` (mis. `other`, `nonkucing`) ditahan dan tampil sebagai "Bukan Keduanya".
+yang beda hanya `target`. Kelas selain `target` (mis. `other`) ditahan dan tampil sebagai "Bukan Keduanya".
 Fitur dibuat server: foto -> segmentasi rembg -> latar abu-abu 127 -> 224x224 -> MobileNetV2 TensorFlow -> 1280.
-Model harus dilatih di atas fitur yang sama (`~/Projects/preprocessing`, ekspor dengan `export_web_model.py`).
-Model lama ada di `arsip/`.
+Model harus dilatih di atas fitur yang sama (notebook Google Colab).
 
 Disimpan dengan: `joblib.dump({...}, "kucing.joblib")`. Pakai versi scikit-learn yang sama dengan `.venv` web.

@@ -19,6 +19,7 @@ class Prediction:
     algorithm: str
     target: str
     tau: float
+    box: list | None = None   # [x0, y0, x1, y1] 0..1, area yang dilihat model; None = seluruh frame
 
 
 def validate(bundle, mode):
@@ -99,9 +100,10 @@ class ModelRegistry:
             started = time.perf_counter()
             features = self.extractor([io.BytesIO(image_bytes)])
             probabilities = classifier.predict_proba(features)[0]
+            box = self.extractor.last_boxes[0]
             elapsed_ms = (time.perf_counter() - started) * 1000
 
         by_class = {str(c): round(float(p), 4) for c, p in zip(classifier.classes_, probabilities)}
         label = max(by_class, key=by_class.get)
         return Prediction(label, by_class[label], by_class, round(elapsed_ms, 1),
-                          bundle["algorithm"], bundle["target"], float(bundle["tau"]))
+                          bundle["algorithm"], bundle["target"], float(bundle["tau"]), box)

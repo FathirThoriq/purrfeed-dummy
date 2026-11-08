@@ -1,8 +1,3 @@
-"""Purr Assistant. Answers come from the owner's own LLM API when configured (persona.md + live device data),
-otherwise from the rule-based fallback below. Both use only numbers read from the database.
-
-Read-only: the assistant explains data and gives advice. It never moves a servo.
-"""
 import re
 
 from flask import current_app

@@ -16,12 +16,12 @@ PORTION_STEP_G = 5
 
 KELAS = {"kucing": "Kucing", "anjing": "Anjing"}
 BUKAN = "Bukan Keduanya"
-SUMBER = {"upload": "Upload", "esp32cam": "ESP32-CAM", "servo": "Servo", "sistem": "Sistem"}
+SUMBER = {"upload": "Upload", "webcam": "Webcam", "esp32cam": "ESP32-CAM", "servo": "Servo", "sistem": "Sistem"}
 IKON_KELAS = {"Kucing": "cat", "Anjing": "dog", BUKAN: "ban"}
 
 
 def kelas_of(label):
-    """Three display classes. Any label that is not a target animal (e.g. 'other', 'nonkucing') is 'Bukan Keduanya'."""
+    """Three display classes. Any label that is not a target animal (e.g. 'other') is 'Bukan Keduanya'."""
     return KELAS.get(label, BUKAN) if label else None
 
 

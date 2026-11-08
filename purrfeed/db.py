@@ -7,7 +7,7 @@ from pathlib import Path
 from flask import current_app, g
 
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS devices (
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS events (
     confidence  REAL,
     thumbnail   TEXT,
     mode        TEXT,
-    source      TEXT    NOT NULL DEFAULT 'esp32cam' CHECK (source IN ('esp32cam', 'upload', 'servo', 'sistem')),
+    source      TEXT    NOT NULL DEFAULT 'esp32cam' CHECK (source IN ('esp32cam', 'upload', 'webcam', 'servo', 'sistem')),
     elapsed_ms  REAL,
     ref_id      INTEGER REFERENCES events(id)   -- 'buang' menunjuk ke pemberian yang sisanya dibuang
 );
@@ -54,6 +54,28 @@ def close_db(_error=None):
         conn.close()
 
 
+def migrate_v3(path):
+    """v3 -> v4 only widens the `source` CHECK (adds 'webcam'): rebuild `events` in place, history kept."""
+    if not path.exists():
+        return
+    with closing(sqlite3.connect(path)) as conn:
+        if conn.execute("PRAGMA user_version").fetchone()[0] != 3:
+            return
+        conn.executescript(f"""
+            PRAGMA foreign_keys = OFF;
+            BEGIN;
+            ALTER TABLE events RENAME TO events_v3;
+            DROP INDEX IF EXISTS events_code_ts;
+            DROP INDEX IF EXISTS events_ref;
+            {SCHEMA}
+            INSERT INTO events SELECT * FROM events_v3;
+            DROP TABLE events_v3;
+            PRAGMA user_version = 4;
+            COMMIT;
+        """)
+    print("[purrfeed] database dimigrasi ke skema v4 (sumber 'webcam'), riwayat tetap")
+
+
 def archive_outdated(path):
     """A database from an older schema is moved aside (never deleted); a fresh one is built with demo data."""
     if not path.exists():
@@ -70,6 +92,7 @@ def archive_outdated(path):
 def init_app(app):
     path = Path(app.config["DATABASE"])
     path.parent.mkdir(parents=True, exist_ok=True)
+    migrate_v3(path)
     archive_outdated(path)
     with closing(sqlite3.connect(path)) as conn:
         conn.executescript(SCHEMA)
