@@ -218,6 +218,7 @@ $('classify').addEventListener('click', async () => {
 /* ---------- webcam USB (getUserMedia) + kotak deteksi ---------- */
 const CAM_KEY = 'pf-webcam';
 let camStream = null, camBusy = false, camTimer = null, lastBox = null;
+let lastMotionId = 0, motionActiveUntil = 0, motionCooldownUntil = 0;
 resultHTML($('resultWebcam'), 'Nyalakan webcam, arahkan ke hewan.');
 
 async function listCameras() {
@@ -290,6 +291,28 @@ async function classifyFrame(record) {
     const r = await api('/api/predict', { method: 'POST', body: fd });
     if (!camStream) return null;
     lastBox = r; drawBox(); renderResult($('resultWebcam'), { ...r, sumber: 'webcam' });
+
+    // Jika sensor mendeteksi objek mendekat & model memastikan kucing terkonfirmasi:
+    // Otomatis catat pemberian pakan (rekam event, kurangi stok, picu servo)!
+    if (!record && Date.now() < motionActiveUntil && Date.now() > motionCooldownUntil && r.keputusan === 'BERI PAKAN') {
+      motionCooldownUntil = Date.now() + 20000; // Cooldown 20 detik
+      motionActiveUntil = 0;
+      const badge = $('motionBadge');
+      if (badge) badge.hidden = true;
+      try {
+        const fdRecord = new FormData();
+        fdRecord.append('file', await grabFrame(), 'webcam.jpg');
+        fdRecord.append('mode', DATA?.device.mode || 'kucing');
+        fdRecord.append('code', code);
+        fdRecord.append('source', 'webcam');
+        const rRec = await api('/api/predict', { method: 'POST', body: fdRecord });
+        toast(rRec.pakan_keluar_g ? `Kucing terkonfirmasi! Beri pakan ${num(rRec.pakan_keluar_g)} g (servo dibuka).` : `Kucing terkonfirmasi: ${rRec.alasan}.`);
+        await load();
+      } catch (err) {
+        console.warn('Gagal catat otomatis pakan:', err);
+      }
+    }
+
     return r;
   } finally { camBusy = false; }
 }
@@ -346,6 +369,45 @@ navigator.mediaDevices?.addEventListener?.('devicechange', () => { if (camStream
 async function poll() {
   try {
     const j = await api('/api/latest?code=' + encodeURIComponent(code));
+
+    // Periksa deteksi objek mendekat dari sensor HC-SR04
+    if (j.motion && j.motion.id) {
+      const badge = $('motionBadge');
+      const badgeText = $('motionBadgeText');
+      if (j.motion.ada) {
+        if (badge) {
+          badge.hidden = false;
+          if (badgeText) badgeText.textContent = `Sensor: Objek Mendekat ${j.motion.jarak_cm ? '(' + j.motion.jarak_cm + ' cm)' : ''}`;
+        }
+      } else if (badge && Date.now() > motionActiveUntil) {
+        badge.hidden = true;
+      }
+
+      if (j.motion.id !== lastMotionId) {
+        lastMotionId = j.motion.id;
+        motionActiveUntil = Date.now() + 30000; // Aktif standby klasifikasi 30 detik
+        toast(`Sensor mendeteksi objek mendekat ${j.motion.jarak_cm ? '(' + j.motion.jarak_cm + ' cm)' : ''}! Mengaktifkan webcam...`);
+
+        // Pindah tab ke webcam
+        selectTab('webcam');
+
+        // Nyalakan webcam otomatis jika belum aktif
+        if (!camStream) {
+          try {
+            await startWebcam();
+          } catch (err) {
+            console.warn('Gagal menyalakan webcam otomatis:', err);
+          }
+        }
+
+        // Pastikan checkbox live detection aktif
+        if (!$('camLive').checked) {
+          $('camLive').checked = true;
+          scheduleLive(100);
+        }
+      }
+    }
+
     const st = $('camStatus');
     if (!j.ada) { st.className = 'status off'; st.replaceChildren(icon('wifi-off'), el('span', '', 'Menunggu alat')); return; }
     if (j.umur_s < 20) { st.className = 'status ok'; st.replaceChildren(icon('wifi'), el('span', '', 'Terhubung')); }
@@ -482,7 +544,7 @@ $('chatClear').addEventListener('click', () => {
 });
 
 load();
-setInterval(poll, 2000);
+setInterval(poll, 1000);
 poll();
 checkProactive();
 setInterval(checkProactive, 30000);

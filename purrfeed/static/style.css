@@ -148,6 +148,7 @@ html[data-theme="dark"] .tab[aria-selected="true"] { color: #031816; background:
 .camSelect { max-width: 210px; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--glass-strong); color: inherit; font: 600 14px "Plus Jakarta Sans"; }
 .check { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; color: var(--muted); cursor: pointer; }
 .check input { width: 16px; height: 16px; accent-color: var(--accent); }
+.sensorBadge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 99px; background: rgba(143, 208, 199, 0.2); border: 1px solid var(--accent); color: var(--accent); font-weight: 700; font-size: 13px; }
 .frame .empty { display: grid; justify-items: center; gap: 10px; padding: 20px; text-align: center; color: var(--muted); font-weight: 600; }
 .frame .empty .mascot { width: 84px; height: 70px; opacity: .85; }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }

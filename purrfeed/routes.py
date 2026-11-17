@@ -8,10 +8,14 @@ from PIL import Image
 
 from . import assistant, db, feeder, insights
 from .decision import decide
+from .serial_feeder import trigger_feed_async
 
 pages = Blueprint("pages", __name__)
 api = Blueprint("api", __name__, url_prefix="/api")
 LATEST = {}   # kode alat -> frame + hasil terakhir dari ESP32-CAM (memori)
+SERVO_COMMANDS = {}   # kode alat -> perintah servo untuk ESP32 via HTTP
+LATEST_MOTION = {}    # kode alat -> data deteksi objek HC-SR04 terakhir
+MOTION_COUNTER = 0
 
 
 def registry():
@@ -115,7 +119,66 @@ def result_json(prediction, decision, grams, stock, mode, code, source):
         "sumber": source,
         "jam": time.strftime("%H:%M:%S"),
         "simulasi": True,
+        "servo_terpicu": bool(decision.feed),
     }
+
+
+@api.post("/motion")
+def motion():
+    """Laporan deteksi objek mendekat dari sensor ESP32."""
+    global MOTION_COUNTER
+    body = request.get_json(silent=True) or {}
+    code = normalize_code(body.get("code")) or "FEED-0001"
+    jarak = body.get("jarak_cm")
+    try:
+        jarak_cm = round(float(jarak), 1) if jarak is not None else None
+    except (ValueError, TypeError):
+        jarak_cm = None
+    MOTION_COUNTER += 1
+    info = {
+        "id": MOTION_COUNTER,
+        "jarak_cm": jarak_cm,
+        "ts": time.time(),
+        "code": code,
+    }
+    LATEST_MOTION[code] = info
+    LATEST_MOTION["_any"] = info
+    print(f"[MOTION] Objek mendekat terdeteksi pada alat {code}! Jarak: {jarak_cm} cm (Event #{MOTION_COUNTER})")
+    return jsonify({"capture": True, "code": code, "motion_id": MOTION_COUNTER, "jarak_cm": jarak_cm})
+
+
+@api.get("/motion")
+def get_motion():
+    """Status gerakan terakhir (untuk polling web dashboard)."""
+    code = normalize_code(request.args.get("code"))
+    info = LATEST_MOTION.get(code) or LATEST_MOTION.get("_any")
+    if not info:
+        return jsonify({"ada": False})
+    umur = time.time() - info["ts"]
+    return jsonify({
+        "ada": umur <= 25.0,
+        "id": info["id"],
+        "jarak_cm": info["jarak_cm"],
+        "umur_s": round(umur, 1),
+        "code": info["code"],
+    })
+
+
+@api.get("/command")
+def get_command():
+    """Polling perintah servo untuk ESP32 (HTTP polling fallback)."""
+    code = normalize_code(request.args.get("code"))
+    cmd = SERVO_COMMANDS.get(code)
+    return jsonify({"servo": cmd})
+
+
+@api.post("/servo")
+def ack_servo():
+    """Konfirmasi eksekusi servo dari ESP32."""
+    body = request.get_json(silent=True) or {}
+    code = normalize_code(body.get("code"))
+    SERVO_COMMANDS.pop(code, None)
+    return jsonify({"status": "ok", "code": code})
 
 
 @api.post("/predict")
@@ -150,6 +213,15 @@ def predict():
         decision, grams = feeder.dispense(device, decision, prediction, image_bytes, source)
         stock = feeder.stock_summary(db.get_device(code))
 
+    # Jika keputusan BERI PAKAN (kucing terdeteksi), gerakkan servo via COM12 & antrean HTTP
+    if decision.feed:
+        if current_app.config.get("SERIAL_ENABLED", True):
+            serial_port = current_app.config.get("SERIAL_PORT", "COM12")
+            baudrate = current_app.config.get("SERIAL_BAUDRATE", 115200)
+            trigger_feed_async(serial_port, baudrate)
+        if code:
+            SERVO_COMMANDS[code] = {"perintah": "buka", "pakan_g": grams or 30.0, "ts": time.time()}
+
     result = result_json(prediction, decision, grams, stock, mode, code, source)
     if code and source == "esp32cam":
         LATEST[code] = {"jpg": image_bytes, "hasil": result, "t": time.time(),
@@ -161,9 +233,23 @@ def predict():
 def latest():
     code = normalize_code(request.args.get("code"))
     item = LATEST.get(code)
+    m = LATEST_MOTION.get(code) or LATEST_MOTION.get("_any")
+    motion_info = None
+    if m:
+        umur = time.time() - m["ts"]
+        if umur <= 25.0:
+            motion_info = {
+                "id": m["id"],
+                "jarak_cm": m["jarak_cm"],
+                "umur_s": round(umur, 1),
+                "code": m["code"],
+            }
+    res: dict[str, object] = {"motion": motion_info}
     if item is None:
-        return jsonify({"ada": False})
-    return jsonify({"ada": True, "umur_s": round(time.time() - item["t"], 1), "n": item["n"], "hasil": item["hasil"]})
+        res["ada"] = False
+        return jsonify(res)
+    res.update({"ada": True, "umur_s": round(time.time() - item["t"], 1), "n": item["n"], "hasil": item["hasil"]})
+    return jsonify(res)
 
 
 @api.get("/latest.jpg")

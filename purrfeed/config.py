@@ -46,6 +46,11 @@ class Config:
     # ID alat terdaftar -> hewan awal (dipilih ulang saat masuk). Tanpa riwayat.
     SEED_DEVICES = {"FEED-0001": "kucing", "FEED-0002": "anjing", "FEED-0003": "kucing"}
 
+    # Integrasi Servo via Serial USB (ESP32-S)
+    SERIAL_PORT = os.environ.get("PURRFEED_SERIAL_PORT", "COM12")
+    SERIAL_BAUDRATE = int(os.environ.get("PURRFEED_SERIAL_BAUDRATE", 115200))
+    SERIAL_ENABLED = os.environ.get("PURRFEED_SERIAL_ENABLED", "1") == "1"
+
     # Purr Assistant: API pribadi kompatibel OpenAI (POST {URL}/chat/completions). Kosong = jawaban aturan.
     LLM_URL = os.environ.get("PURRFEED_LLM_URL", "")
     LLM_KEY = os.environ.get("PURRFEED_LLM_KEY", "")
