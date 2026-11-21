@@ -2,7 +2,12 @@ import csv
 import io
 import re
 import time
+import os
+import json
+import paho.mqtt.publish as publish
+import hmac
 
+from functools import wraps
 from flask import Blueprint, Response, current_app, jsonify, request
 from PIL import Image
 
@@ -17,6 +22,30 @@ SERVO_COMMANDS = {}   # kode alat -> perintah servo untuk ESP32 via HTTP
 LATEST_MOTION = {}    # kode alat -> data deteksi objek HC-SR04 terakhir
 MOTION_COUNTER = 0
 
+def require_api_key(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        expected_key = os.getenv("API_SECRET_KEY", "").strip()
+        if not expected_key:
+            return jsonify({"error": "Server API_SECRET_KEY belum dikonfigurasi."}), 500
+
+        # 1. Jalur resmi IoT / camera_worker.py via Header X-API-Key
+        provided_key = request.headers.get("X-API-Key", "").strip()
+        if provided_key and hmac.compare_digest(provided_key, expected_key):
+            return f(*args, **kwargs)
+
+        # 2. Jalur halaman web dashboard sendiri (tanpa mengekspos secret key ke browser)
+        origin = request.headers.get("Origin", "")
+        referer = request.headers.get("Referer", "")
+        same_origin = (
+            (origin and origin.split("://")[-1].split("/")[0] == request.host)
+            or (referer and referer.split("://")[-1].split("/")[0] == request.host)
+        )
+        if same_origin and request.form.get("source") in ("upload", "webcam"):
+            return f(*args, **kwargs)
+
+        return jsonify({"error": "Unauthorized: API Key tidak valid."}), 401
+    return decorated_function
 
 def registry():
     return current_app.extensions["models"]
@@ -180,8 +209,29 @@ def ack_servo():
     SERVO_COMMANDS.pop(code, None)
     return jsonify({"status": "ok", "code": code})
 
+def publish_feed_mqtt(code: str, grams: float):
+    broker_host = os.getenv("MQTT_BROKER_HOST", "127.0.0.1")
+    broker_port = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+    mqtt_user = os.getenv("MQTT_USER")
+    mqtt_pass = os.getenv("MQTT_PASS")
+
+    auth = {"username": mqtt_user, "password": mqtt_pass} if mqtt_user else None
+    topic = f"purrfeed/{code}/command"
+    payload = json.dumps({"perintah": "FEED", "pakan_g": grams})
+
+    try:
+        publish.single(
+            topic,
+            payload=payload,
+            hostname=broker_host,
+            port=broker_port,
+            auth=auth,
+        )
+    except Exception as e:
+        current_app.logger.warning(f"Gagal publish MQTT ke {topic}: {e}")
 
 @api.post("/predict")
+@require_api_key
 def predict():
     """Used by the ESP32-CAM (default source) and by the dashboard upload tab (source=upload)."""
     upload = request.files.get("file")
@@ -221,6 +271,7 @@ def predict():
             trigger_feed_async(serial_port, baudrate)
         if code:
             SERVO_COMMANDS[code] = {"perintah": "buka", "pakan_g": grams or 30.0, "ts": time.time()}
+            publish_feed_mqtt(code, grams or 30.0)
 
     result = result_json(prediction, decision, grams, stock, mode, code, source)
     if code and source == "esp32cam":
